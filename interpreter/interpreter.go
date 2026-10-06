@@ -238,6 +238,22 @@ func RegexProgramSizeLimit(limit int) PlannerOption {
 	return CustomDecoratorV2(decRegexProgramSizeLimit(limit))
 }
 
+// HostCallLimit configures a per-evaluation budget on host function calls.
+//
+// Each actual invocation of a host function (including receiver-style dispatch) consumes
+// one unit of the budget; calls which are never executed, such as the skipped branch of a
+// short-circuited logical operator, are not charged. Comprehension (macro) iterations
+// share the budget of the enclosing evaluation. Once the budget is exhausted, evaluation
+// of the next call returns a "host call limit exceeded" error before the host function is
+// entered. The budget resets at the start of every evaluation pass. A limit of zero means
+// host calls are unbounded.
+func HostCallLimit(limit uint64) PlannerOption {
+	return func(p *planner) (*planner, error) {
+		p.hostCallLimit = &limit
+		return p, nil
+	}
+}
+
 type exprInterpreter struct {
 	dispatcher  Dispatcher
 	container   *containers.Container

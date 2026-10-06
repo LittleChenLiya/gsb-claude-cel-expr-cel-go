@@ -52,6 +52,14 @@ type evalContext struct {
 	// memory provides the context for tracking peak memory during evaluation.
 	memory *types.MemoryTracker
 
+	// hostCallLimit is the maximum number of host function calls permitted during a
+	// single evaluation. A zero value means host calls are unbounded.
+	hostCallLimit uint64
+
+	// hostCallCount is the number of host function calls charged so far during the
+	// current evaluation.
+	hostCallCount uint64
+
 	// ctx is the context for async call implementations to use.
 	ctx context.Context
 
@@ -189,6 +197,8 @@ func (f *ExecutionFrame) Close() {
 		f.ctx.state = nil
 		f.ctx.costs = nil
 		f.ctx.memory = nil
+		f.ctx.hostCallLimit = 0
+		f.ctx.hostCallCount = 0
 		f.ctx.interrupted.Store(false)
 		f.ctx.interruptCheckCount.Store(0)
 		f.ctx.interruptCheckFrequency = 0
@@ -384,6 +394,36 @@ func (f *ExecutionFrame) SetCostTracker(tracker *CostTracker) {
 	}
 	f.ctx.costs = tracker
 	f.costTracker = tracker
+}
+
+// SetHostCallLimit sets the maximum number of host function calls permitted during a
+// single evaluation and resets the charge count, so each evaluation pass starts with a
+// fresh budget. A limit of zero means host calls are unbounded.
+//
+// The budget is stored on the shared evaluation context, so calls made within
+// comprehension (macro) iterations are charged against the same budget as the rest of
+// the evaluation.
+func (f *ExecutionFrame) SetHostCallLimit(limit uint64) {
+	if f.ctx == nil {
+		f.ctx = evalContextPool.Get().(*evalContext)
+	}
+	f.ctx.hostCallLimit = limit
+	f.ctx.hostCallCount = 0
+}
+
+// ChargeHostCall attempts to charge one host function call against the per-evaluation
+// budget, returning false if the budget has been exhausted. Callers must not invoke the
+// host function when this method returns false.
+func (f *ExecutionFrame) ChargeHostCall() bool {
+	ctx := f.ctx
+	if ctx == nil || ctx.hostCallLimit == 0 {
+		return true
+	}
+	if ctx.hostCallCount >= ctx.hostCallLimit {
+		return false
+	}
+	ctx.hostCallCount++
+	return true
 }
 
 // ComputeResult tracks and computes the result of the given asynchronous function.

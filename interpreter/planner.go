@@ -61,6 +61,7 @@ type planner struct {
 	decorators         []InterpretableDecoratorV2
 	observers          []StatefulObserver
 	costTrackerFactory func() (*CostTracker, error)
+	hostCallLimit      *uint64
 }
 
 type planBuilder struct {
@@ -89,10 +90,29 @@ func (p *planner) Plan(expr ast.Expr) (InterpretableV2, error) {
 	if p.costTrackerFactory != nil {
 		i = &costTrackingInterpretable{InterpretableV2: i, factory: p.costTrackerFactory}
 	}
+	if p.hostCallLimit != nil {
+		i = &hostCallLimitInterpretable{InterpretableV2: i, limit: *p.hostCallLimit}
+	}
 	if len(p.observers) == 0 {
 		return i, nil
 	}
 	return &ObservableInterpretable{InterpretableV2: i, observers: p.observers}, nil
+}
+
+// hostCallLimitInterpretable resets the per-evaluation host call budget at the start of
+// every evaluation pass, so each Eval begins with a fresh budget.
+type hostCallLimitInterpretable struct {
+	InterpretableV2
+	limit uint64
+}
+
+func (h *hostCallLimitInterpretable) Exec(frame *ExecutionFrame) ref.Val {
+	frame.SetHostCallLimit(h.limit)
+	return h.InterpretableV2.Exec(frame)
+}
+
+func (h *hostCallLimitInterpretable) Eval(ctx Activation) ref.Val {
+	return EvalActivation(ctx, h.Exec)
 }
 
 // observeAll returns an EvalObserver which reports each observation to all of the observers.

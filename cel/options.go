@@ -974,6 +974,22 @@ func CostLimit(costLimit uint64) ProgramOption {
 	}
 }
 
+// HostCallLimit configures a per-evaluation budget on host function calls.
+//
+// Each actual invocation of a host function (including receiver-style dispatch) consumes
+// one unit of the budget; calls which are never executed, such as the skipped branch of a
+// short-circuited logical operator, are not charged. Comprehension (macro) iterations
+// share the budget of the enclosing evaluation. Once the budget is exhausted, evaluation
+// of the next call returns a "host call limit exceeded" error before the host function is
+// entered. The budget resets at the start of every Eval. A limit of zero means host calls
+// are unbounded.
+func HostCallLimit(limit uint64) ProgramOption {
+	return func(p *prog) (*prog, error) {
+		p.hostCallLimit = &limit
+		return p, nil
+	}
+}
+
 func fieldToCELType(field protoreflect.FieldDescriptor) (*Type, error) {
 	if field.Kind() == protoreflect.MessageKind || field.Kind() == protoreflect.GroupKind {
 		msgName := (string)(field.Message().FullName())

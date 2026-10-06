@@ -53,6 +53,7 @@ go_test(
         "attribute_patterns_test.go",
         "attributes_test.go",
         "frame_test.go",
+        "host_call_limit_test.go",
         "interpreter_test.go",
         "prune_test.go",
         "runtimecost_test.go",

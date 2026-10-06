@@ -265,6 +265,7 @@ type prog struct {
 	callCostEstimator cost.ActualCostEstimator
 	costOptions       []cost.TrackerOption
 	costLimit         *uint64
+	hostCallLimit     *uint64
 	memoryOptions     []types.MemoryTrackerOption
 	memoryLimit       *uint32
 
@@ -364,6 +365,10 @@ func newProgram(e *Env, a *ast.AST, opts []ProgramOption) (Program, error) {
 	// Enable interrupt checking if there's a non-zero check frequency
 	if p.interruptCheckFrequency > 0 {
 		plannerOptions = append(plannerOptions, interpreter.InterruptableEval())
+	}
+	// Enable the per-evaluation host call budget when configured.
+	if p.hostCallLimit != nil {
+		plannerOptions = append(plannerOptions, interpreter.HostCallLimit(*p.hostCallLimit))
 	}
 	// Enable constant folding first.
 	if p.evalOpts&OptOptimize == OptOptimize {
