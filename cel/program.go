@@ -267,6 +267,7 @@ type prog struct {
 	costLimit         *uint64
 	memoryOptions     []types.MemoryTrackerOption
 	memoryLimit       *uint32
+	hostCallLimit     *uint64
 
 	// hasAsync indicates the planned expression contains an asynchronous function call, which can
 	// only be resolved by ConcurrentEval.
@@ -550,6 +551,9 @@ func (p *prog) newExecutionFrame(input any) (*interpreter.ExecutionFrame, error)
 	frame, err := interpreter.NewExecutionFrame(input)
 	if err != nil {
 		return nil, err
+	}
+	if p.hostCallLimit != nil {
+		frame.SetHostCallLimit(*p.hostCallLimit)
 	}
 	if p.defaultVars != nil {
 		if err := frame.SetDefaultVars(p.defaultVars); err != nil {

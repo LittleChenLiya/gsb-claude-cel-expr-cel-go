@@ -52,6 +52,13 @@ type evalContext struct {
 	// memory provides the context for tracking peak memory during evaluation.
 	memory *types.MemoryTracker
 
+	// hostCallLimit is the maximum number of host function calls permitted during a single
+	// evaluation. A zero value indicates the calls are not limited.
+	hostCallLimit uint64
+
+	// hostCallCount tracks the number of host function calls invoked during the evaluation.
+	hostCallCount uint64
+
 	// ctx is the context for async call implementations to use.
 	ctx context.Context
 
@@ -189,6 +196,8 @@ func (f *ExecutionFrame) Close() {
 		f.ctx.state = nil
 		f.ctx.costs = nil
 		f.ctx.memory = nil
+		f.ctx.hostCallLimit = 0
+		f.ctx.hostCallCount = 0
 		f.ctx.interrupted.Store(false)
 		f.ctx.interruptCheckCount.Store(0)
 		f.ctx.interruptCheckFrequency = 0
@@ -384,6 +393,34 @@ func (f *ExecutionFrame) SetCostTracker(tracker *CostTracker) {
 	}
 	f.ctx.costs = tracker
 	f.costTracker = tracker
+}
+
+// SetHostCallLimit sets the maximum number of host function calls permitted for this
+// evaluation. A zero limit disables host call accounting.
+func (f *ExecutionFrame) SetHostCallLimit(limit uint64) {
+	if f.ctx == nil {
+		f.ctx = evalContextPool.Get().(*evalContext)
+	}
+	f.ctx.hostCallLimit = limit
+	f.ctx.hostCallCount = 0
+}
+
+// TrackHostCall charges one host function call against the per-evaluation budget, returning
+// false when the budget configured via SetHostCallLimit has been exhausted.
+//
+// The check must be performed before the host function is entered so that over-limit calls
+// are never dispatched. Calls which are short-circuited and never reach this point are not
+// charged. The budget is shared by all frames within a single evaluation, including
+// comprehension (macro) iterations, and resets on each independent evaluation.
+func (f *ExecutionFrame) TrackHostCall() bool {
+	if f.ctx == nil || f.ctx.hostCallLimit == 0 {
+		return true
+	}
+	if f.ctx.hostCallCount >= f.ctx.hostCallLimit {
+		return false
+	}
+	f.ctx.hostCallCount++
+	return true
 }
 
 // ComputeResult tracks and computes the result of the given asynchronous function.

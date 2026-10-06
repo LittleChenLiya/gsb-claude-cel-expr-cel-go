@@ -974,6 +974,22 @@ func CostLimit(costLimit uint64) ProgramOption {
 	}
 }
 
+// HostCallLimit sets the maximum number of host function calls permitted during a single
+// evaluation.
+//
+// Only calls which actually enter a host function are charged: calls which are short-circuited
+// and never executed do not count against the limit. Iterations of comprehension macros (e.g.
+// map, filter) share the budget of the enclosing evaluation. When the limit is reached, the
+// next host call is rejected with a "host call limit exceeded" error before the host function
+// is entered. The budget resets on each independent Eval call. A limit of 0 disables host
+// call accounting.
+func HostCallLimit(limit uint64) ProgramOption {
+	return func(p *prog) (*prog, error) {
+		p.hostCallLimit = &limit
+		return p, nil
+	}
+}
+
 func fieldToCELType(field protoreflect.FieldDescriptor) (*Type, error) {
 	if field.Kind() == protoreflect.MessageKind || field.Kind() == protoreflect.GroupKind {
 		msgName := (string)(field.Message().FullName())

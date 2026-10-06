@@ -415,6 +415,10 @@ func (p *planBuilder) planCallUnary(expr ast.Expr,
 		trait:     trait,
 		impl:      fn,
 		nonStrict: nonStrict,
+		// The not-strictly-false functions are macro-generated comprehension control flow,
+		// akin to the specialized &&, ||, and ?: operators, rather than host-visible calls,
+		// so they are not charged against the per-evaluation host call budget.
+		controlFlow: function == operators.NotStrictlyFalse || function == operators.OldNotStrictlyFalse,
 	}, nil
 }
 
