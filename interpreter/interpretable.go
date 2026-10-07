@@ -591,7 +591,7 @@ func (zero *evalZeroArity) ID() int64 {
 
 // Exec implements the InterpretableV2 interface method.
 func (zero *evalZeroArity) Exec(frame *ExecutionFrame) ref.Val {
-	res := labelErrNode(zero.id, zero.impl())
+	res := wrapFunctionErr(zero.id, zero.function, zero.impl())
 	if costs := frame.CostTracker(); costs != nil {
 		costs.EvalZeroArity(frame, zero.id, zero, res)
 	}
@@ -660,11 +660,11 @@ func (un *evalUnary) Exec(frame *ExecutionFrame) ref.Val {
 	// If the implementation is bound and the argument value has the right traits required to
 	// invoke it, then call the implementation.
 	if un.impl != nil && (un.trait == 0 || matchOperandTrait(un.trait, strict, argVal)) {
-		res = labelErrNode(un.id, un.impl(argVal))
+		res = wrapFunctionErr(un.id, un.function, un.impl(argVal))
 	} else if argVal.Type().HasTrait(traits.ReceiverType) {
 		// Otherwise, if the argument is a ReceiverType attempt to invoke the receiver method on the
 		// operand (arg0).
-		res = labelErrNode(un.id, argVal.(traits.Receiver).Receive(un.function, un.overload, []ref.Val{}))
+		res = wrapFunctionErr(un.id, un.function, argVal.(traits.Receiver).Receive(un.function, un.overload, []ref.Val{}))
 	} else {
 		res = types.NewErrWithNodeID(un.id, "no such overload: %s", un.function)
 	}
@@ -749,11 +749,11 @@ func (bin *evalBinary) Exec(frame *ExecutionFrame) ref.Val {
 	// If the implementation is bound and the argument value has the right traits required to
 	// invoke it, then call the implementation.
 	if bin.impl != nil && (bin.trait == 0 || matchOperandTrait(bin.trait, strict, lVal)) {
-		res = labelErrNode(bin.id, bin.impl(lVal, rVal))
+		res = wrapFunctionErr(bin.id, bin.function, bin.impl(lVal, rVal))
 	} else if lVal.Type().HasTrait(traits.ReceiverType) {
 		// Otherwise, if the argument is a ReceiverType attempt to invoke the receiver method on the
 		// operand (arg0).
-		res = labelErrNode(bin.id, lVal.(traits.Receiver).Receive(bin.function, bin.overload, []ref.Val{rVal}))
+		res = wrapFunctionErr(bin.id, bin.function, lVal.(traits.Receiver).Receive(bin.function, bin.overload, []ref.Val{rVal}))
 	} else {
 		res = types.NewErrWithNodeID(bin.id, "no such overload: %s", bin.function)
 	}
@@ -839,7 +839,7 @@ func (fn *evalVarArgs) Exec(frame *ExecutionFrame) ref.Val {
 	if len(argVals) == 0 {
 		var res ref.Val
 		if fn.impl != nil {
-			res = labelErrNode(fn.id, fn.impl())
+			res = wrapFunctionErr(fn.id, fn.function, fn.impl())
 		} else {
 			res = types.NewErrWithNodeID(fn.id, "no such overload: %s %d", fn.function, fn.id)
 		}
@@ -853,11 +853,11 @@ func (fn *evalVarArgs) Exec(frame *ExecutionFrame) ref.Val {
 	// invoke it, then call the implementation.
 	arg0 := argVals[0]
 	if fn.impl != nil && matchOperandTrait(fn.trait, strict, arg0) {
-		res = labelErrNode(fn.id, fn.impl(argVals...))
+		res = wrapFunctionErr(fn.id, fn.function, fn.impl(argVals...))
 	} else if arg0.Type().HasTrait(traits.ReceiverType) {
 		// Otherwise, if the argument is a ReceiverType attempt to invoke the receiver method on the
 		// operand (arg0).
-		res = labelErrNode(fn.id, arg0.(traits.Receiver).Receive(fn.function, fn.overload, argVals[1:]))
+		res = wrapFunctionErr(fn.id, fn.function, arg0.(traits.Receiver).Receive(fn.function, fn.overload, argVals[1:]))
 	} else {
 		res = types.NewErrWithNodeID(fn.id, "no such overload: %s %d", fn.function, fn.id)
 	}
@@ -952,7 +952,7 @@ func (fn *evalLateBoundFunc) Exec(frame *ExecutionFrame) ref.Val {
 	// declaration promised a binding supplied at evaluation time, so a missing or mismatched
 	// binding is unambiguously an error.
 	if lateFn, found := fn.resolve(frame, argVals, strict); found {
-		res = types.LabelErrNode(fn.id, lateFn(argVals...))
+		res = wrapFunctionErr(fn.id, fn.function, lateFn(argVals...))
 	} else {
 		res = types.NewErrWithNodeID(fn.id, "no such overload: %s", fn.function)
 	}
