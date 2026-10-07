@@ -52,6 +52,7 @@ go_test(
         "async_test.go",
         "attribute_patterns_test.go",
         "attributes_test.go",
+        "bindingkeys_test.go",
         "frame_test.go",
         "interpreter_test.go",
         "prune_test.go",

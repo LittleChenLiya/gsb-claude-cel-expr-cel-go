@@ -198,6 +198,91 @@ func NewHierarchicalActivation(parent Activation, child Activation) Activation {
 	return &hierarchicalActivation{parent: parent, child: child, poolAllocated: false}
 }
 
+// BindingKeys returns the set of root variable names which have a binding present in the
+// activation hierarchy, without resolving any binding and therefore without evaluating lazy
+// bindings (func() any / func() ref.Val) or otherwise executing expression-related code.
+//
+// A key is reported as present even when the bound value is nil: an explicit nil binding is a
+// supplied binding, unlike a name for which no binding exists. The walk covers the built-in
+// activation implementations (map-backed, hierarchical, partial, empty, and function
+// activations). A custom Activation may participate in the walk by implementing the
+// BindingKeySetCarrier interface; custom activations which do not are skipped since their bound
+// names cannot be enumerated without invoking ResolveName.
+func BindingKeys(vars Activation) map[string]bool {
+	present, nilBound := BindingKeySets(vars)
+	for name := range nilBound {
+		present[name] = true
+	}
+	return present
+}
+
+// BindingKeySets returns the root variable names bound in the activation hierarchy, split into
+// the names carrying a non-nil value and the names explicitly bound to nil. An explicit nil
+// binding is therefore distinguishable from a name which was never supplied.
+//
+// Like BindingKeys, this inspects binding structure only: lazy bindings are never invoked and no
+// expression code runs. Custom Activations may implement BindingKeySetCarrier to participate;
+// otherwise only the built-in activation types are walked.
+func BindingKeySets(vars Activation) (map[string]bool, map[string]bool) {
+	present := map[string]bool{}
+	nilBound := map[string]bool{}
+	collectBindingKeys(vars, present, nilBound)
+	return present, nilBound
+}
+
+// BindingKeySetCarrier is an opt-in interface a custom Activation may implement to expose the
+// root names it binds without resolving (and therefore without evaluating lazy bindings).
+//
+// BindingKeySets returns two sets: the names bound to non-nil values and the names explicitly
+// bound to nil. A name present in neither set is treated as not supplied.
+type BindingKeySetCarrier interface {
+	BindingKeySets() (present map[string]bool, nilBound map[string]bool)
+}
+
+// collectBindingKeys walks an activation hierarchy and records the names of the bindings it
+// contains, separating explicitly nil bindings from non-nil ones.
+func collectBindingKeys(vars Activation, present, nilBound map[string]bool) {
+	for vars != nil {
+		switch a := vars.(type) {
+		case emptyActivation:
+			// No bindings.
+		case *mapActivation:
+			for name, val := range a.bindings {
+				if val == nil {
+					nilBound[name] = true
+					delete(present, name)
+				} else if !nilBound[name] {
+					present[name] = true
+				}
+			}
+		case *hierarchicalActivation:
+			// Flatten the hierarchy rather than relying on recursion order so that bindings
+			// shadowed by a child scope are still recorded as present.
+			collectBindingKeys(a.child, present, nilBound)
+			vars = a.parent
+			continue
+		case *partActivation:
+			collectBindingKeys(a.Activation, present, nilBound)
+		default:
+			// Custom activations opt into key enumeration explicitly; resolving their values
+			// would risk evaluating lazy bindings, which the precheck must not do.
+			if carrier, ok := vars.(BindingKeySetCarrier); ok {
+				cp, cn := carrier.BindingKeySets()
+				for name := range cp {
+					if !nilBound[name] {
+						present[name] = true
+					}
+				}
+				for name := range cn {
+					nilBound[name] = true
+					delete(present, name)
+				}
+			}
+		}
+		vars = vars.Parent()
+	}
+}
+
 // NewPartialActivation returns an Activation which contains a list of AttributePattern values
 // representing field and index operations that should result in a 'types.Unknown' result.
 //

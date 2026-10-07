@@ -254,6 +254,10 @@ type prog struct {
 	interpreter             interpreter.Interpreter
 	interruptCheckFrequency uint
 
+	// checkedAst is the compiled AST the program was built from, retained for structural input
+	// binding checks performed before evaluation.
+	checkedAst *ast.AST
+
 	// Intermediate state used to configure the InterpretableDecorator set provided
 	// to the initInterpretable call.
 	plannerOptions     []interpreter.PlannerOption
@@ -277,6 +281,11 @@ type prog struct {
 	asyncObserver             async.Observer
 	asyncCompletionBufferSize int
 	asyncMaxConcurrency       int
+
+	// bindingCheck configures the optional pre-evaluation inspection of the input binding keys.
+	// When non-nil, Eval/ContextEval/ConcurrentEval compare the supplied root keys against the
+	// compiled declaration set before any expression evaluation.
+	bindingCheck *bindingCheckConfig
 }
 
 // scanOptTargets walks the AST once and reports whether the Optimize()
@@ -328,6 +337,7 @@ func newProgram(e *Env, a *ast.AST, opts []ProgramOption) (Program, error) {
 		costOptions:    []cost.TrackerOption{},
 		drainStrategy:  async.DrainReady(100 * time.Microsecond),
 		hasAsync:       hasAsync,
+		checkedAst:     a,
 	}
 
 	// Configure the program via the ProgramOption values.
@@ -547,6 +557,11 @@ func (p *prog) ContextEval(ctx context.Context, input any) (ref.Val, *EvalDetail
 
 // newExecutionFrame creates an ExecutionFrame for the given input without a timeout context.
 func (p *prog) newExecutionFrame(input any) (*interpreter.ExecutionFrame, error) {
+	if p.bindingCheck != nil {
+		if err := p.precheckBindings(input); err != nil {
+			return nil, err
+		}
+	}
 	frame, err := interpreter.NewExecutionFrame(input)
 	if err != nil {
 		return nil, err
@@ -558,6 +573,46 @@ func (p *prog) newExecutionFrame(input any) (*interpreter.ExecutionFrame, error)
 		}
 	}
 	return frame, nil
+}
+
+// precheckBindings structurally inspects the root keys of the input bindings (and any default
+// variable bindings) against the compiled declaration set. It runs before the execution frame is
+// built and never evaluates a binding or executes an expression.
+func (p *prog) precheckBindings(input any) error {
+	present := map[string]bool{}
+	nilBound := map[string]bool{}
+	addKeys := func(pr, nb map[string]bool) {
+		for name := range nb {
+			nilBound[name] = true
+			delete(present, name)
+		}
+		for name := range pr {
+			if !nilBound[name] {
+				present[name] = true
+			}
+		}
+	}
+	if m, ok := input.(map[string]any); ok {
+		pr, nb, err := suppliedBindingKeys(m)
+		if err != nil {
+			return err
+		}
+		addKeys(pr, nb)
+	} else if act, ok := input.(interpreter.Activation); ok {
+		pr, nb := interpreter.BindingKeySets(act)
+		addKeys(pr, nb)
+	} else {
+		// An *interpreter.ExecutionFrame (internal calls) is not re-checked; its bindings were
+		// checked when the outer frame was created. Any other type is rejected by
+		// NewExecutionFrame, so let it produce the standard input-type error.
+		return nil
+	}
+	if p.defaultVars != nil {
+		pr, nb := interpreter.BindingKeySets(p.defaultVars)
+		addKeys(pr, nb)
+	}
+	_, err := p.checkBindingKeys(p.checkedAst, present, nilBound, p.bindingCheck)
+	return err
 }
 
 // newAsyncFrame creates an ExecutionFrame configured for asynchronous evaluation under the

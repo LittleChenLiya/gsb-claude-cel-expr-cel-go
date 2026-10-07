@@ -793,6 +793,34 @@ func EvalOptions(opts ...EvalOption) ProgramOption {
 	}
 }
 
+// CheckInputBindings enables a pre-evaluation check of the root variable keys supplied to
+// Eval/ContextEval/ConcurrentEval against the variables referenced by the compiled expression
+// and declared in the environment.
+//
+// The check is structural and runs before any evaluation: object properties are never accessed,
+// lazy bindings (func() any / func() ref.Val) are never invoked, and no part of the expression is
+// executed. An explicit nil binding counts as supplied.
+//
+// At least one policy must be supplied: RejectMissingBindings causes evaluation to return a
+// *BindingCheckError when a referenced root variable is absent, and RejectExtraBindings does the
+// same for supplied root keys that are neither referenced nor declared. The two may be combined.
+// Valid bindings proceed through the normal Program evaluation path unchanged.
+//
+// For a report-only, one-shot inspection independent of a Program, see Env.CheckInputBindings.
+func CheckInputBindings(opts ...BindingCheckOption) ProgramOption {
+	return func(p *prog) (*prog, error) {
+		if len(opts) == 0 {
+			return nil, errors.New("CheckInputBindings requires at least one BindingCheckOption")
+		}
+		conf, err := newBindingCheckConfig(opts...)
+		if err != nil {
+			return nil, err
+		}
+		p.bindingCheck = conf
+		return p, nil
+	}
+}
+
 // InterruptCheckFrequency configures the number of iterations within a comprehension to evaluate
 // before checking whether the function evaluation has been interrupted.
 func InterruptCheckFrequency(checkFrequency uint) ProgramOption {
