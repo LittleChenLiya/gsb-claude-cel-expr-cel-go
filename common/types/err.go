@@ -119,6 +119,77 @@ func WrapErr(err error) ref.Val {
 	return &Err{error: err}
 }
 
+// HostFuncError is an error raised by a host function call during evaluation.
+//
+// The error preserves the name of the function which was invoked, the AST
+// node id of the call expression, and the original error produced by the
+// function implementation so that hosts may inspect failures with errors.Is
+// and errors.As.
+type HostFuncError interface {
+	error
+	// FunctionName returns the name of the function whose call failed.
+	FunctionName() string
+	// NodeID returns the AST node id of the call expression which raised the
+	// error. The id may be resolved to a source location with the AST
+	// SourceInfo associated with the expression.
+	NodeID() int64
+	// Unwrap returns the original error produced by the host function.
+	Unwrap() error
+}
+
+// hostFuncError implements the HostFuncError interface.
+type hostFuncError struct {
+	function string
+	id       int64
+	cause    error
+}
+
+// NewHostFuncError creates a HostFuncError which associates the function name
+// and call expression node id with the original error produced by a host
+// function call.
+//
+// The error message matches the cause message to preserve compatibility with
+// existing error inspection, while errors.Is and errors.As traverse to the
+// original cause.
+func NewHostFuncError(function string, id int64, cause error) HostFuncError {
+	return &hostFuncError{function: function, id: id, cause: cause}
+}
+
+// Error implements the error interface.
+func (e *hostFuncError) Error() string {
+	return e.cause.Error()
+}
+
+// FunctionName implements the HostFuncError interface.
+func (e *hostFuncError) FunctionName() string {
+	return e.function
+}
+
+// NodeID implements the HostFuncError interface.
+func (e *hostFuncError) NodeID() int64 {
+	return e.id
+}
+
+// Unwrap implements the HostFuncError interface.
+func (e *hostFuncError) Unwrap() error {
+	return e.cause
+}
+
+// WrapHostFuncErr annotates an Err value produced by a host function call with
+// the function name and the AST node id of the call expression, preserving the
+// original error for errors.Is and errors.As inspection.
+//
+// Non-error values are returned unaltered, as are errors which have already
+// been attributed to an AST node, ensuring the innermost failing call site is
+// preserved as the error origin. The result remains a CEL error value and is
+// never converted into a normal value.
+func WrapHostFuncErr(function string, id int64, val ref.Val) ref.Val {
+	if err, ok := val.(*Err); ok && err.id == 0 {
+		return &Err{error: NewHostFuncError(function, id, err.error), id: id}
+	}
+	return val
+}
+
 // ConvertToNative implements ref.Val.ConvertToNative.
 func (e *Err) ConvertToNative(typeDesc reflect.Type) (any, error) {
 	return nil, e.error

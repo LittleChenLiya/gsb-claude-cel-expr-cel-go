@@ -112,7 +112,7 @@ func (fn *evalAsyncFunc) Exec(frame *ExecutionFrame) ref.Val {
 		return unk
 	}
 	result := frame.ComputeResult(fn.ID(), fn.Function(), fn.OverloadID(), fn.impl, argVals)
-	val := types.LabelErrNode(fn.id, result)
+	val := types.WrapHostFuncErr(fn.function, fn.id, result)
 	if costs := frame.CostTracker(); costs != nil {
 		costs.EvalVarArgs(frame, fn.id, fn, argVals, val)
 	}
