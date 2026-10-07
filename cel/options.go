@@ -802,6 +802,31 @@ func InterruptCheckFrequency(checkFrequency uint) ProgramOption {
 	}
 }
 
+// ValidateInputBindings enables a pre-evaluation check of the input bindings against the
+// environment's declared variable set.
+//
+// Before each evaluation, the input keys are compared with the declared root variables: missing
+// declared variables and unexpected input keys cause Eval, ContextEval, and ConcurrentEval to
+// return an *InputBindingError without evaluating the expression. A key bound to an explicit nil
+// is considered provided.
+//
+// The check only inspects binding keys and the compiled declaration set; it never reads binding
+// values, accesses object properties, or invokes lazy bindings. Pass the AllowExtraVariables
+// option to report only missing variables.
+//
+// By default, program evaluation performs no input binding check.
+func ValidateInputBindings(opts ...InputBindingOption) ProgramOption {
+	return func(p *prog) (*prog, error) {
+		// A non-nil slice (even when empty) marks the check as enabled; append(nil, nil...)
+		// would otherwise stay nil and silently disable a check configured without options.
+		p.inputBindingOpts = append(p.inputBindingOpts, opts...)
+		if p.inputBindingOpts == nil {
+			p.inputBindingOpts = []InputBindingOption{}
+		}
+		return p, nil
+	}
+}
+
 // AsyncCallObserver sets the observer for monitoring asynchronous function calls during ConcurrentEval.
 func AsyncCallObserver(observer async.Observer) ProgramOption {
 	return func(p *prog) (*prog, error) {

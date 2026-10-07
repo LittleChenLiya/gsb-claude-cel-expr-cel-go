@@ -301,6 +301,32 @@ func (f *ExecutionFrame) ResolveFunction(name string) (functions.LateBoundOp, bo
 	return f.functions.ResolveFunction(name)
 }
 
+// BindingNames implements the BindingNamesActivation interface, enumerating the root variable
+// names visible from the frame without resolving any binding value. Lazy variables held directly
+// by the frame are reported by name but not invoked.
+func (f *ExecutionFrame) BindingNames() (map[string]bool, bool) {
+	names := map[string]bool{}
+	for name := range f.vars {
+		names[name] = true
+	}
+	complete := true
+	if f.scope != nil {
+		scopeNames, scopeComplete := RootBindingNames(f.scope)
+		for name := range scopeNames {
+			names[name] = true
+		}
+		complete = scopeComplete
+	}
+	if f.parent != nil {
+		parentNames, parentComplete := f.parent.BindingNames()
+		for name := range parentNames {
+			names[name] = true
+		}
+		complete = complete && parentComplete
+	}
+	return names, complete
+}
+
 // AsPartialActivation implements the PartialActivation interface by proxying to the internal scope or parent.
 func (f *ExecutionFrame) AsPartialActivation() (PartialActivation, bool) {
 	if f.scope != nil {

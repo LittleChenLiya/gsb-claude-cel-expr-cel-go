@@ -48,6 +48,7 @@ go_library(
 go_test(
     name = "go_default_test",
     srcs = [
+        "activation_bindingnames_test.go",
         "activation_test.go",
         "async_test.go",
         "attribute_patterns_test.go",

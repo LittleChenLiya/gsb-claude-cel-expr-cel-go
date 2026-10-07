@@ -272,6 +272,10 @@ type prog struct {
 	// only be resolved by ConcurrentEval.
 	hasAsync bool
 
+	// inputBindingOpts configures the pre-evaluation input binding check. A nil slice leaves the
+	// default behavior unchanged (no check); a non-nil slice enables the check with its options.
+	inputBindingOpts []InputBindingOption
+
 	// Async evaluation configuration used by ConcurrentEval.
 	drainStrategy             async.DrainStrategy
 	asyncObserver             async.Observer
@@ -473,6 +477,13 @@ func (p *prog) Eval(input any) (out ref.Val, det *EvalDetails, err error) {
 	if p.hasAsync {
 		return nil, nil, errAsyncRequiresConcurrentEval
 	}
+	// Validate the input binding keys against the compiled declaration set before creating an
+	// execution frame or evaluating the expression. ContextEval reaches this point with the
+	// *interpreter.ExecutionFrame it built via newExecutionFrame, so default vars are already
+	// represented in the frame's visible bindings and are checked exactly once.
+	if err := p.validateInputBindings(input); err != nil {
+		return nil, nil, err
+	}
 	// Build a hierarchical activation if there are default vars set.
 	var frame *interpreter.ExecutionFrame
 	var mustClose bool
@@ -560,6 +571,35 @@ func (p *prog) newExecutionFrame(input any) (*interpreter.ExecutionFrame, error)
 	return frame, nil
 }
 
+// validateInputBindings runs the configured pre-evaluation input binding check.
+//
+// The check is a no-op unless the program was built with ValidateInputBindings. It examines only
+// binding keys and the compiled declaration set: no binding value is read, no object property is
+// accessed, no lazy binding is invoked, and the expression is not evaluated. Names supplied by
+// the program's default (global) vars count as provided alongside the per-evaluation input.
+func (p *prog) validateInputBindings(input any) error {
+	if p.inputBindingOpts == nil {
+		return nil
+	}
+	names, err := inputBindingNames(input)
+	if err != nil {
+		return err
+	}
+	if p.defaultVars != nil {
+		defaultNames, complete := interpreter.RootBindingNames(p.defaultVars)
+		if !complete {
+			return fmt.Errorf(
+				"default variables of type %T cannot enumerate their variable names: "+
+					"implement interpreter.BindingNamesActivation to enable input binding checks",
+				p.defaultVars)
+		}
+		for name := range defaultNames {
+			names[name] = true
+		}
+	}
+	return checkInputBindings(p.Env.Variables(), names, p.inputBindingOpts)
+}
+
 // newAsyncFrame creates an ExecutionFrame configured for asynchronous evaluation under the
 // given context, wiring the observer and concurrency limit from the program options.
 func (p *prog) newAsyncFrame(ctx context.Context, input any) (*interpreter.ExecutionFrame, error) {
@@ -624,6 +664,12 @@ func (p *prog) ConcurrentEval(ctx context.Context, input any) <-chan EvalResult 
 
 	go func() {
 		defer close(resCh)
+		// Validate the input binding keys before any evaluation work. Asynchronous functions
+		// cannot be invoked as a side effect of the check since only binding keys are inspected.
+		if err := p.validateInputBindings(input); err != nil {
+			resCh <- EvalResult{Err: err}
+			return
+		}
 		frame, err := p.newAsyncFrame(ctx, input)
 		if err != nil {
 			resCh <- EvalResult{Err: err}

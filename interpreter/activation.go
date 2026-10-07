@@ -35,6 +35,69 @@ type Activation interface {
 	Parent() Activation
 }
 
+// BindingNamesActivation is an optional interface implemented by Activations which can enumerate
+// the top-level (root) variable names they supply without resolving a binding.
+//
+// Enumerating the names, as opposed to resolving values, allows input bindings to be validated
+// before evaluation begins without triggering lazy bindings (func() any) or adapting and accessing
+// any binding value.
+//
+// BindingNames returns the set of root variable names and a boolean indicating whether the
+// activation is capable of enumerating its names. An activation which dynamically computes its
+// bindings may return false to opt out of enumeration-based validation.
+type BindingNamesActivation interface {
+	BindingNames() (map[string]bool, bool)
+}
+
+// RootBindingNames returns the set of top-level variable names supplied anywhere within the
+// activation hierarchy, along with a boolean indicating whether all activations in the hierarchy
+// support name enumeration.
+//
+// The method only inspects binding keys: no binding value is read or adapted, and lazy bindings
+// (func() any / func() ref.Val) are never invoked. When an activation in the hierarchy does not
+// implement the BindingNamesActivation interface, the names gathered from the rest of the
+// hierarchy are still returned and the boolean result is false.
+func RootBindingNames(a Activation) (map[string]bool, bool) {
+	names := map[string]bool{}
+	complete := collectBindingNames(a, names, map[Activation]bool{})
+	return names, complete
+}
+
+// collectBindingNames walks an activation hierarchy, gathering root binding names without
+// resolving any binding. The visited set guards against maliciously cyclic activation hierarchies.
+func collectBindingNames(a Activation, names map[string]bool, visited map[Activation]bool) bool {
+	if a == nil || visited[a] {
+		return true
+	}
+	visited[a] = true
+	switch act := a.(type) {
+	case emptyActivation:
+		return true
+	case *mapActivation:
+		for name := range act.bindings {
+			names[name] = true
+		}
+		return collectBindingNames(act.parent, names, visited)
+	case *hierarchicalActivation:
+		complete := collectBindingNames(act.child, names, visited)
+		return collectBindingNames(act.parent, names, visited) && complete
+	case *partActivation:
+		return collectBindingNames(act.Activation, names, visited)
+	default:
+		complete := true
+		if enumerator, ok := a.(BindingNamesActivation); ok {
+			enumerated, canEnumerate := enumerator.BindingNames()
+			for name := range enumerated {
+				names[name] = true
+			}
+			complete = canEnumerate
+		} else {
+			complete = false
+		}
+		return collectBindingNames(a.Parent(), names, visited) && complete
+	}
+}
+
 // EmptyActivation returns a variable-free activation.
 func EmptyActivation() Activation {
 	return emptyActivation{}
@@ -128,6 +191,17 @@ func (a *mapActivation) ResolveName(name string) (any, bool) {
 func (a *mapActivation) ResolveFunction(name string) (functions.LateBoundOp, bool) {
 	fn, found := a.functions[name]
 	return fn, found
+}
+
+// BindingNames implements the BindingNamesActivation interface method, returning the root
+// variable keys held by this activation without resolving any value. Lazy bindings are reported
+// by name but not invoked.
+func (a *mapActivation) BindingNames() (map[string]bool, bool) {
+	names := make(map[string]bool, len(a.bindings))
+	for name := range a.bindings {
+		names[name] = true
+	}
+	return names, true
 }
 
 // AsPartialActivation supports partial evaluation over the activation being extended.
